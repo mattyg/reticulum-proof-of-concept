@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     let mut input: String = "".to_string();
     loop {
         input = rl.readline(format!("{}> ", args.nick.clone()).as_str())?;
-        // chatter.chat(input);
+        chatter.chat(input.as_bytes()).await;
         println!("Chatted: {}", input);
     }
 }

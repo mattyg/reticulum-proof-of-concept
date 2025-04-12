@@ -1,10 +1,9 @@
-use crate::types::{AnnounceInfo, Message};
-use std::{collections::{BTreeSet, HashMap, HashSet}, io::Cursor, sync::Arc, time::Duration};
-
-use reticulum::{buffer::StaticBuffer, destination::{link::{self, Link, LinkEventData}, Destination, DestinationName, SingleInputDestination, SingleOutputDestination}, hash::AddressHash, identity::{Identity, PrivateIdentity}, iface::{tcp_client::TcpClient, tcp_server::TcpServer}, packet::Packet, transport::Transport};
-use rmp_serde::{Deserializer, Serializer};
-use serde::{Serialize, Deserialize};
-use tokio::{sync::{broadcast::{self, Receiver}, Mutex}, task::AbortHandle, time};
+use crate::types::AnnounceInfo;
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use reticulum::{destination::{link::{self, Link, LinkEventData}, DestinationName, SingleInputDestination, SingleOutputDestination}, hash::AddressHash, identity::{Identity, PrivateIdentity}, iface::{tcp_client::TcpClient, tcp_server::TcpServer}, packet::Packet, transport::Transport};
+use rmp_serde::Serializer;
+use serde::Serialize;
+use tokio::{sync::{broadcast::Receiver, Mutex}, task::AbortHandle, time};
 use rand_core::OsRng;
 
 /// A reticulum node that can chat
@@ -79,15 +78,10 @@ impl Chatter {
     }
 
     /// Send a chat message
-    pub async fn chat(&self, message: String) {
-        // Serialize message to msgpack
-        let mut buf = Vec::new();
-        message.serialize(&mut Serializer::new(&mut buf)).unwrap();
-        let message_bytes = buf.as_slice();
-
+    pub async fn chat(&self, message: &[u8]) {
         // Send message to all my peers
         for peer in self.peers.iter() {
-            self.transport.send_to_out_links(peer.0, message_bytes).await;
+            self.transport.send_to_out_links(peer.0, message).await;
         }
     }
 }
@@ -164,12 +158,7 @@ async fn recv_in_link_event_task(mut peers: HashMap<AddressHash, Arc<Mutex<Link>
                 peers.remove(&link_event_data.address_hash);
             },
             link::LinkEvent::Data(payload) => {
-                let mut deserializer = Deserializer::new(Cursor::new(payload.as_slice()));
-                if let Ok(Message(message)) = Deserialize::deserialize(&mut deserializer) {
-                    print!("<< {}", message);
-                } else {
-                    print!("Received link data could not be deserialized, ignoring...");
-                }
+                print!("<< {}", String::from_utf8(payload.as_slice().to_vec()).unwrap());
             }
         }
     }
