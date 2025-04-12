@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-reticulum = { path = "../Reticulum-rs" }
+reticulum = { git = "ssh://git@github.com/mattyg/Reticulum-rs.git", branch = "fix/minor-fixes" }
 rustyline = "15.0.0"
 tokio = "1.44.0"
 clap = { version = "4.5.36", features = ["derive"] }
