@@ -270,6 +270,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chatter-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "log",
+ "rand_core",
+ "reticulum",
+ "rmp-serde",
+ "rustyline",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1211,7 +1227,7 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 [[package]]
 name = "reticulum"
 version = "0.1.0"
-source = "git+ssh://git@github.com/mattyg/Reticulum-rs.git?branch=fix%2Fminor-fixes#c7a3dfd3487723179d7ffd5a16cd599920e00eec"
+source = "git+ssh://git@github.com/mattyg/Reticulum-rs.git?branch=main#4d08f032c78625ac11be27d2849f59e13667a23e"
 dependencies = [
  "aes",
  "cbc",
@@ -1231,22 +1247,6 @@ dependencies = [
  "tonic",
  "tonic-build",
  "x25519-dalek",
-]
-
-[[package]]
-name = "reticulum-poc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "log",
- "rand_core",
- "reticulum",
- "rmp-serde",
- "rustyline",
- "serde",
- "tokio",
 ]
 
 [[package]]
@@ -1451,6 +1451,18 @@ name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
+
+[[package]]
+name = "tcp-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "log",
+ "reticulum",
+ "tokio",
+]
 
 [[package]]
 name = "tempfile"

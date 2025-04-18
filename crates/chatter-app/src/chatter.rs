@@ -2,30 +2,34 @@ use crate::types::AnnounceInfo;
 use rand_core::OsRng;
 use reticulum::{
     destination::{
-        DestinationName, SingleInputDestination, SingleOutputDestination,
-        link::{self, Link, LinkEventData},
+        link::{self, Link, LinkEventData}, DestinationName, SingleInputDestination, SingleOutputDestination
     },
     hash::AddressHash,
     identity::PrivateIdentity,
     iface::tcp_client::TcpClient,
-    transport::Transport,
+    transport::{Transport, TransportConfig},
 };
 use rmp_serde::Serializer;
 use serde::Serialize;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::{HashMap, HashSet}, sync::Arc, time::Duration};
 use tokio::{
     sync::{Mutex, broadcast::Receiver},
     task::AbortHandle,
     time,
 };
 
-/// A reticulum node that can chat
-pub struct Chatter {
+pub struct ChatterTransport {
     transport: Transport,
 
     /// Others who are chatting about the same topic
-    peers: HashMap<AddressHash, Arc<Mutex<Link>>>,
+    peers: Mutex<HashSet<AddressHash>>,
+}
 
+pub type ChatterTransportHandle = Arc<ChatterTransport>;
+
+/// A reticulum node that can chat
+pub struct Chatter {
+    transport_handle: ChatterTransportHandle,
     announce_task: AbortHandle,
     recv_announce_task: AbortHandle,
     recv_in_link_event_task: AbortHandle,
@@ -40,19 +44,16 @@ impl Drop for Chatter {
 }
 
 impl Chatter {
-    pub async fn new(nick: String, topic: String) -> Self {
+    pub async fn new(server_host: String, nick: String, topic: String) -> Self {
         // Create Identity
         let identity = PrivateIdentity::new_from_rand(OsRng);
 
-        // Create empty peers list
-        let peers = HashMap::new();
-
         // Create the Transport
-        let mut transport = Transport::new();
+        let mut transport = Transport::new(TransportConfig::new(nick.clone(), false));
 
         // Add the Tcp client interfaces
         transport.iface_manager().lock().await.spawn(
-            TcpClient::new("reticulum.betweentheborders.com:4242"),
+            TcpClient::new(server_host),
             TcpClient::spawn,
         );
 
@@ -61,10 +62,15 @@ impl Chatter {
         println!("Crated my destination {}", destination_name.hash);
         let in_destination = transport.add_destination(identity, destination_name).await;
 
+        let transport_handle = Arc::new(ChatterTransport {
+            transport,
+            peers: Mutex::new(HashSet::new())
+        });
+
         // Start the outgoing announce task
         let announce_info = AnnounceInfo { nick };
         let announce_task = tokio::task::spawn(announce_task(
-            transport.clone(),
+            transport_handle.clone(),
             in_destination.clone(),
             announce_info,
         ))
@@ -72,31 +78,22 @@ impl Chatter {
 
         // Handle incoming announce packets
         let recv_announce_task = tokio::task::spawn(recv_announce_task(
-            transport.clone(),
-            peers.clone(),
+            transport_handle.clone(),
             destination_name,
             in_destination.clone(),
-            transport.clone().recv_announces().await,
+            transport_handle.transport.recv_announces().await,
         ))
         .abort_handle();
 
         // Handle incoming link events
         let recv_in_link_event_task = tokio::task::spawn(recv_in_link_event_task(
-            peers.clone(),
-            transport.clone().in_link_events(),
-        ))
-        .abort_handle();
-
-        // Handle incoming link events
-        let recv_out_link_event_task = tokio::task::spawn(recv_out_link_event_task(
-            peers.clone(),
-            transport.clone().out_link_events(),
+            transport_handle.clone(),
+            transport_handle.transport.in_link_events(),
         ))
         .abort_handle();
 
         Self {
-            transport,
-            peers,
+            transport_handle,
             announce_task,
             recv_announce_task,
             recv_in_link_event_task,
@@ -105,16 +102,23 @@ impl Chatter {
 
     /// Send a chat message
     pub async fn chat(&self, message: &[u8]) {
+        let peers = self.transport_handle.peers.lock().await;
+        
+        if peers.is_empty() {
+            println!("Chat message sent, but no peers in peer_store. Ignoring...");
+        }
+        
         // Send message to all my peers
-        for peer in self.peers.iter() {
-            self.transport.send_to_out_links(peer.0, message).await;
+        for address_hash in peers.iter() {
+            println!("Sending message to address {}", address_hash);
+            self.transport_handle.transport.send_to_out_links(address_hash, message).await;
         }
     }
 }
 
 /// Task that loops forever, sending my own announce packet every `config.anounce_interval_ms`
 async fn announce_task(
-    transport: Transport,
+    transport_handle: ChatterTransportHandle,
     in_destination: Arc<Mutex<SingleInputDestination>>,
     announce_info: AnnounceInfo,
 ) {
@@ -138,7 +142,7 @@ async fn announce_task(
                 .await
                 .announce(OsRng, Some(announce_info_bytes_slice))
                 .unwrap();
-            let _ = transport.send_broadcast(packet).await;
+            let _ = transport_handle.transport.send_broadcast(packet).await;
             println!(
                 "\n***\nAnnounced myself as '{}' {}\n***\n",
                 announce_info.nick,
@@ -151,8 +155,7 @@ async fn announce_task(
 
 /// Task that awaits receiving announce packets from others, and adds them to my FriendStore
 async fn recv_announce_task(
-    transport: Transport,
-    mut peers: HashMap<AddressHash, Arc<Mutex<Link>>>,
+    transport_handle: ChatterTransportHandle,
     destination_name: DestinationName,
     in_destination: Arc<Mutex<SingleInputDestination>>,
     mut recv: Receiver<Arc<Mutex<SingleOutputDestination>>>,
@@ -164,27 +167,24 @@ async fn recv_announce_task(
             println!("Received announce for my destination name");
             {
                 let in_destination_lock = in_destination.lock().await;
+                let mut peers_lock = transport_handle.peers.lock().await;
 
                 // Check if announce is already in the peer store, or is for my own identity
-                if !peers.contains_key(&destination.identity.address_hash)
+                if !peers_lock.contains(&destination.identity.address_hash)
                     && &destination.identity.address_hash
                         != in_destination_lock.identity.address_hash()
                 {
-                    // Create a new Link with this peer
-                    let link = transport.link(destination.desc).await;
-                    {
-                        let link_lock = link.lock().await;
-                        println!("Created link to {}", link_lock.destination().address_hash)
-                    }
-
+                   // Create a new Link with this peer
+                    print!("Adding link with desc address={} identiy address ={}", destination.desc.address_hash, destination.identity.address_hash);
+                    let _ = transport_handle.transport.link(destination.desc).await;
                     // Add peer & Link to peers store
-                    peers.insert(destination.identity.address_hash, link);
+                    peers_lock.insert(destination.desc.address_hash);
 
                     println!(
                         "Updated peers store: {:?}\n\n",
-                        peers
+                        peers_lock
                             .iter()
-                            .map(|p| format!("{}", p.0))
+                            .map(|p| format!("{}", p))
                             .collect::<Vec<String>>()
                     );
                 } else {
@@ -198,7 +198,7 @@ async fn recv_announce_task(
 }
 
 async fn recv_in_link_event_task(
-    mut peers: HashMap<AddressHash, Arc<Mutex<Link>>>,
+    transport_handle: ChatterTransportHandle,
     mut recv: Receiver<LinkEventData>,
 ) {
     while let Ok(link_event_data) = recv.recv().await {
@@ -208,7 +208,8 @@ async fn recv_in_link_event_task(
             }
             link::LinkEvent::Closed => {
                 print!("Received Link Closed");
-                peers.remove(&link_event_data.address_hash);
+                let mut peers_lock = transport_handle.peers.lock().await;
+                peers_lock.remove(&link_event_data.address_hash);
             }
             link::LinkEvent::Data(payload) => {
                 print!(
@@ -217,14 +218,5 @@ async fn recv_in_link_event_task(
                 );
             }
         }
-    }
-}
-
-async fn recv_out_link_event_task(
-    peers: HashMap<AddressHash, Arc<Mutex<Link>>>,
-    mut recv: Receiver<LinkEventData>,
-) {
-    while let Ok(link_event_data) = recv.recv().await {
-        println!("OUT link event data")
     }
 }

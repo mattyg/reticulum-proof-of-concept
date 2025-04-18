@@ -1,19 +1,17 @@
-[package]
-name = "reticulum-poc"
-version = "0.1.0"
-edition = "2024"
 
-[dependencies]
-reticulum = { git = "ssh://git@github.com/mattyg/Reticulum-rs.git", branch = "fix/minor-fixes" }
-rustyline = "15.0.0"
-tokio = "1.44.0"
-clap = { version = "4.5.36", features = ["derive"] }
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+reticulum = { git = "ssh://git@github.com/mattyg/Reticulum-rs.git", branch = "main" }
+#reticulum = { path = "../Reticulum-rs" }
 anyhow = "1.0.97"
-rand_core = { version = "0.6.4", features = ["getrandom"] }
-serde = { version = "1", features = ["derive"] }
-rmp-serde = "1.3.0"
+clap = { version = "4.5.36", features = ["derive"] }
+tokio = "1.44.0"
 
-
-# Logging
 log = "0.4.26"
 env_logger = "0.10"
